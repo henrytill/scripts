@@ -20,7 +20,7 @@ data RsyncJob = RsyncJob
 
 jobs :: [RsyncJob]
 jobs =
-  [ RsyncJob { hosts         = ["nereus", "thaumas"]
+  [ RsyncJob { hosts         = ["thaumas"]
              , sources       = \home -> [ home <> "/tmp"
                                         , home <> "/doc"
                                         ]
