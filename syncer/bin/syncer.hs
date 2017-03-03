@@ -74,14 +74,14 @@ process host job source =
     let tarballTarget = concat [dir, "/", takeBaseName source, ".tar.gz"]
     putStrLn ("Compressing " ++ source ++ " to " ++ tarballTarget)
     tar (tarFlags job) tarballTarget source
-    putStrLn ("Synchronizing " ++ tarballTarget)
+    putStrLn ("Copying " ++ tarballTarget)
     rsync (rsyncFlags job) (target job host) tarballTarget
   else do
-    putStrLn ("Synchronizing " ++ source)
+    putStrLn ("Copying " ++ source)
     rsync (rsyncFlags job) (target job host) source
 
 runOne :: String -> RsyncJob -> IO ()
-runOne host j = getHome >>= pure . sources j >>= mapM_ (process host j)
+runOne host j = sources j <$> getHome >>= mapM_ (process host j)
 
 runMany :: [RsyncJob] -> IO ()
 runMany js = do
