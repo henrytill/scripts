@@ -1,0 +1,57 @@
+#! /usr/bin/env nix-shell
+#! nix-shell -i runhaskell -p "haskellPackages.ghcWithPackages (pkgs: [pkgs.mtl pkgs.regex-compat])"
+
+{-# LANGUAGE FlexibleContexts #-}
+
+-- Inspired by https://gist.github.com/nkpart/5923908
+
+import Control.Monad.State
+import Data.List (isInfixOf)
+import System.Directory (getCurrentDirectory)
+import System.Environment (getArgs)
+import System.FilePath (makeRelative)
+import Text.Regex
+
+ansiRegex, compileRegex :: Regex
+ansiRegex    = mkRegex "\\[[0-9]+m"
+compileRegex = mkRegex "^\\[error\\] (.*:[0-9]+:.*)$"
+
+filterAnsi :: String -> String
+filterAnsi line = subRegex ansiRegex stripped ""
+  where stripped = filter (/= '\ESC') line
+
+compileError :: FilePath -> String -> Maybe String
+compileError b input = (makeRelative b . join) <$> (matchRegex compileRegex =<< s)
+  where s = if "Total time" `isInfixOf` input
+            then Nothing
+            else Just input
+
+sessionTerminated :: String -> Bool
+sessionTerminated = isInfixOf "Waiting for source"
+
+processLine :: (MonadState [String] m, MonadIO m) => FilePath -> String -> String -> m ()
+processLine base filename line =
+  if sessionTerminated line
+    then do
+      content <- join . map (++ "\n") . reverse <$> get
+      _       <- liftIO $ writeFile filename content
+      put []
+    else
+      case compileError base line of
+        Just s  -> modify (s :)
+        Nothing -> return ()
+
+generateCfile :: (MonadState [String] m, MonadIO m) => FilePath -> String -> m ()
+generateCfile base filename =
+  forever $ (filterAnsi <$> liftIO getLine) >>= processLine base filename
+
+main :: IO ()
+main = do
+  base <- getCurrentDirectory
+  args <- getArgs
+  let filename = case args of
+                   []    -> "errors.err"
+                   (x:_) -> x
+  void $ runStateT (generateCfile base filename) []
+
+-- vim: set filetype=haskell:
