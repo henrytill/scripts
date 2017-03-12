@@ -1,4 +1,4 @@
-#! /usr/bin/env runhaskell
+#! /usr/bin/env runghc
 
 import Control.Monad
 import Data.Monoid
