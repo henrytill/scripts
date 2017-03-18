@@ -10,6 +10,7 @@ import Data.List (isInfixOf)
 import System.Directory (getCurrentDirectory)
 import System.Environment (getArgs)
 import System.FilePath (makeRelative)
+import System.IO (isEOF)
 import Text.Regex
 
 ansiRegex, compileRegex :: Regex
@@ -41,9 +42,9 @@ processLine base filename line =
         Just s  -> modify (s :)
         Nothing -> return ()
 
-generateCfile :: (MonadState [String] m, MonadIO m) => FilePath -> String -> m ()
-generateCfile base filename =
-  forever $ (filterAnsi <$> liftIO getLine) >>= processLine base filename
+generate :: (MonadState [String] m, MonadIO m) => FilePath -> String -> m ()
+generate base filename = liftIO isEOF >>= flip unless (f base filename >> generate base filename)
+  where f b n = (filterAnsi <$> liftIO getLine) >>= processLine b n
 
 main :: IO ()
 main = do
@@ -52,6 +53,6 @@ main = do
   let filename = case args of
                    []    -> "errors.err"
                    (x:_) -> x
-  void $ runStateT (generateCfile base filename) []
+  void $ runStateT (generate base filename) []
 
 -- vim: set filetype=haskell:
