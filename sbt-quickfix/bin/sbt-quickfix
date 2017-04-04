@@ -55,4 +55,8 @@ main = do
                    (x:_) -> x
   void $ runStateT (generate base filename) []
 
+-- Local Variables:
+-- mode: haskell
+-- End:
+--
 -- vim: set filetype=haskell:
