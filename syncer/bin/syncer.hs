@@ -22,7 +22,7 @@ jobs :: [RsyncJob]
 jobs =
   [ RsyncJob { hosts         = ["thaumas"]
              , sources       = \home -> [ home <> "/tmp"
-                                        , home <> "/doc"
+                                        , home <> "/var/Makefile"
                                         ]
              , target        = \host -> "backup:Dropbox/bup/machines/" <> host
              , rsyncFlags    = ["-a"]
