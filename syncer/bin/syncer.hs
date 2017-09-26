@@ -1,6 +1,11 @@
-#! /usr/bin/env runghc
+#! /usr/bin/env nix-shell
+#! nix-shell -i runghc -p "haskellPackages.ghcWithPackages (pkgs: [pkgs.transformers])"
+
+{-# LANGUAGE OverloadedStrings #-}
 
 import Control.Monad
+import Control.Monad.IO.Class
+import Control.Monad.Trans.Writer.Strict
 import Data.Monoid
 import System.Exit
 import System.FilePath
@@ -9,42 +14,46 @@ import System.Posix.Files
 import System.Posix.Temp
 import System.Process
 
-data RsyncJob = RsyncJob
-  { hosts         :: [String]
-  , sources       :: FilePath -> [FilePath]
-  , target        :: String   -> FilePath
-  , rsyncFlags    :: [String]
-  , shouldTarball :: Bool
-  , tarFlags      :: [String]
+data Env = Env
+  { _home :: FilePath
+  , _host :: String
   }
 
-jobs :: [RsyncJob]
-jobs =
-  [ RsyncJob { hosts         = ["thaumas"]
-             , sources       = \home -> [ home <> "/tmp"
-                                        , home <> "/var/sync.sh"
-                                        , home <> "/var/sources.txt"
-                                        ]
-             , target        = \host -> "backup:Dropbox/bup/machines/" <> host
-             , rsyncFlags    = ["-a"]
-             , shouldTarball = False
-             , tarFlags      = []
-             }
-  , RsyncJob { hosts         = ["nereus"]
-             , sources       = const [ "/srv/git" ]
-             , target        = \host -> "backup:Dropbox/bup/machines/" <> host
-             , rsyncFlags    = ["-a"]
-             , shouldTarball = True
-             , tarFlags      = []
-             }
-  , RsyncJob { hosts         = ["nereus", "thaumas"]
-             , sources       = \home -> [ home <> "/.emacs.d/elpa" ]
-             , target        = \host -> "backup:Dropbox/bup/machines/" <> host
-             , rsyncFlags    = ["-rlptD", "--remove-source-files"]
-             , shouldTarball = True
-             , tarFlags      = ["-p", "--exclude=*.elc"]
-             }
-  ]
+data RsyncJob = RsyncJob
+  { _hosts         :: [String]
+  , _sources       :: [FilePath]
+  , _target        :: FilePath
+  , _rsyncFlags    :: [String]
+  , _shouldTarball :: Bool
+  , _tarFlags      :: [String]
+  }
+
+jobs :: Env -> [RsyncJob]
+jobs env =
+  let home = _home env
+      host = _host env
+  in [ RsyncJob { _hosts         = ["thaumas"]
+                , _sources       = [ home <> "/tmp" ]
+                , _target        = "backup:Dropbox/bup/machines/" <> host
+                , _rsyncFlags    = ["-a"]
+                , _shouldTarball = False
+                , _tarFlags      = []
+                }
+     , RsyncJob { _hosts         = ["nereus"]
+                , _sources       = [ "/srv/git" ]
+                , _target        = "backup:Dropbox/bup/machines/" <> host
+                , _rsyncFlags    = ["-a"]
+                , _shouldTarball = True
+                , _tarFlags      = []
+                }
+     , RsyncJob { _hosts         = ["nereus", "thaumas"]
+                , _sources       = [ home <> "/.emacs.d/elpa" ]
+                , _target        = "backup:Dropbox/bup/machines/" <> host
+                , _rsyncFlags    = ["-rlptD", "--remove-source-files"]
+                , _shouldTarball = True
+                , _tarFlags      = ["-p", "--exclude=*.elc"]
+                }
+     ]
 
 getHome :: IO FilePath
 getHome = maybe (error "Could not get HOME") return =<< getEnv "HOME"
@@ -67,28 +76,32 @@ tar flags target source =
                      ["-C" ++ takeDirectory source] ++
                      [takeBaseName source])
 
-process :: String -> RsyncJob -> FilePath -> IO ()
-process host job source =
-  if (shouldTarball job)
+process :: RsyncJob -> FilePath -> WriterT [String] IO ()
+process job source =
+  if (_shouldTarball job)
   then do
-    dir <- mkdtemp "/tmp/syncer"
+    dir <- liftIO $ mkdtemp "/tmp/syncer-"
     let tarballTarget = concat [dir, "/", takeBaseName source, ".tar.gz"]
-    putStrLn ("Compressing " ++ source ++ " to " ++ tarballTarget)
-    tar (tarFlags job) tarballTarget source
-    putStrLn ("Copying " ++ tarballTarget)
-    rsync (rsyncFlags job) (target job host) tarballTarget
+    liftIO $ tar (_tarFlags job) tarballTarget source
+    tell ["Compressed " ++ source ++ " to " ++ tarballTarget]
+    liftIO $ rsync (_rsyncFlags job) (_target job) tarballTarget
+    tell ["Copied " ++ tarballTarget]
   else do
-    putStrLn ("Copying " ++ source)
-    rsync (rsyncFlags job) (target job host) source
+    liftIO $ rsync (_rsyncFlags job) (_target job) source
+    tell ["Copied " ++ source]
 
-runOne :: String -> RsyncJob -> IO ()
-runOne host j = sources j <$> getHome >>= mapM_ (process host j)
+runOne :: RsyncJob -> IO ()
+runOne j = mapM_ f (_sources j)
+  where
+    f s = execWriterT (process j s) >>= putStr . unlines
 
-runMany :: [RsyncJob] -> IO ()
-runMany js = do
+runMany :: (Env -> [RsyncJob]) -> IO ()
+runMany jobs = do
+  home     <- getHome
   thisHost <- hostname
-  myJobs   <- pure $ filter (\job -> thisHost `elem` hosts job) js
-  mapM_ (runOne thisHost) myJobs
+  let js   = jobs Env{ _home = home, _host = thisHost}
+      myJs = filter (elem thisHost . _hosts) js
+  mapM_ runOne myJs
 
 main :: IO ()
 main = runMany jobs
