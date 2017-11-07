@@ -1,18 +1,14 @@
-#! /usr/bin/env nix-shell
-#! nix-shell -i runghc -p "haskellPackages.ghcWithPackages (pkgs: [pkgs.transformers])"
+#! /usr/bin/env runghc
 
 {-# LANGUAGE OverloadedStrings #-}
 
-import Control.Monad
-import Control.Monad.IO.Class
-import Control.Monad.Trans.Writer.Strict
-import Data.Monoid
-import System.Exit
-import System.FilePath
-import System.Posix.Env
-import System.Posix.Files
-import System.Posix.Temp
-import System.Process
+module Syncer (main) where
+
+import Data.Monoid       ((<>))
+import System.FilePath   (takeBaseName, takeDirectory)
+import System.Posix.Env  (getEnv)
+import System.Posix.Temp (mkdtemp)
+import System.Process    (callProcess, readProcess)
 
 data Env = Env
   { _home :: FilePath
@@ -28,38 +24,38 @@ data RsyncJob = RsyncJob
   , _tarFlags      :: [String]
   }
 
-jobs :: Env -> [RsyncJob]
-jobs env =
+createJobs :: Env -> [RsyncJob]
+createJobs env =
   let home = _home env
       host = _host env
   in [ RsyncJob { _hosts         = ["thaumas"]
-                , _sources       = [ home <> "/tmp" ]
+                , _sources       = [home <> "/tmp"]
                 , _target        = "backup:Dropbox/bup/machines/" <> host
                 , _rsyncFlags    = ["-a"]
                 , _shouldTarball = False
                 , _tarFlags      = []
                 }
      , RsyncJob { _hosts         = ["nereus"]
-                , _sources       = [ "/srv/git" ]
+                , _sources       = ["/srv/git"]
                 , _target        = "backup:Dropbox/bup/machines/" <> host
                 , _rsyncFlags    = ["-a"]
                 , _shouldTarball = True
                 , _tarFlags      = []
                 }
      , RsyncJob { _hosts         = ["nereus", "thaumas"]
-                , _sources       = [ home <> "/.emacs.d/elpa" ]
+                , _sources       = [home <> "/.emacs.d/elpa"]
                 , _target        = "backup:Dropbox/bup/machines/" <> host
                 , _rsyncFlags    = ["-rlptD", "--remove-source-files"]
                 , _shouldTarball = True
-                , _tarFlags      = ["-p", "--exclude=*.elc"]
+                , _tarFlags      = ["-p", "--exclude=*.elc", "--exclude=S.gpg-agent*"]
                 }
      ]
 
 getHome :: IO FilePath
 getHome = maybe (error "Could not get HOME") return =<< getEnv "HOME"
 
-hostname :: IO String
-hostname = stripNewlines <$> readProcess "hostname" ["-s"] []
+getHostname :: IO String
+getHostname = stripNewlines <$> readProcess "hostname" ["-s"] []
   where
     stripNewlines :: String -> String
     stripNewlines = filter (/= '\n')
@@ -76,32 +72,32 @@ tar flags target source =
                      ["-C" ++ takeDirectory source] ++
                      [takeBaseName source])
 
-process :: RsyncJob -> FilePath -> WriterT [String] IO ()
+process :: RsyncJob -> FilePath -> IO ()
 process job source =
   if (_shouldTarball job)
   then do
-    dir <- liftIO $ mkdtemp "/tmp/syncer-"
+    dir <- mkdtemp "/tmp/syncer-"
     let tarballTarget = concat [dir, "/", takeBaseName source, ".tar.gz"]
-    liftIO $ tar (_tarFlags job) tarballTarget source
-    tell ["Compressed " ++ source ++ " to " ++ tarballTarget]
-    liftIO $ rsync (_rsyncFlags job) (_target job) tarballTarget
-    tell ["Copied " ++ tarballTarget]
+    tar (_tarFlags job) tarballTarget source
+    putStrLn ("Compressed " ++ source ++ " to " ++ tarballTarget)
+    rsync (_rsyncFlags job) (_target job) tarballTarget
+    putStrLn ("Copied " ++ tarballTarget ++ " to " ++ (_target job))
   else do
-    liftIO $ rsync (_rsyncFlags job) (_target job) source
-    tell ["Copied " ++ source]
+    rsync (_rsyncFlags job) (_target job) source
+    putStrLn ("Copied " ++ source ++ " to " ++ (_target job))
 
 runOne :: RsyncJob -> IO ()
 runOne j = mapM_ f (_sources j)
   where
-    f s = execWriterT (process j s) >>= putStr . unlines
+    f s = process j s
 
 runMany :: (Env -> [RsyncJob]) -> IO ()
-runMany jobs = do
+runMany k = do
   home     <- getHome
-  thisHost <- hostname
-  let js   = jobs Env{ _home = home, _host = thisHost}
-      myJs = filter (elem thisHost . _hosts) js
-  mapM_ runOne myJs
+  thisHost <- getHostname
+  let jobs   = k Env{_home = home, _host = thisHost}
+      myJobs = filter (elem thisHost . _hosts) jobs
+  mapM_ runOne myJobs
 
 main :: IO ()
-main = runMany jobs
+main = runMany createJobs
