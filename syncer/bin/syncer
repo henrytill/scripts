@@ -101,3 +101,9 @@ runMany k = do
 
 main :: IO ()
 main = runMany createJobs
+
+-- Local Variables:
+-- mode: haskell
+-- End:
+--
+-- vim: set filetype=haskell:
