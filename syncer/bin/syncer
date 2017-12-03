@@ -35,6 +35,13 @@ createJobs env =
                 , _shouldTarball = False
                 , _tarFlags      = []
                 }
+     , RsyncJob { _hosts         = ["proteus"]
+                , _sources       = [home <> "/Documents", home <> "/Downloads"]
+                , _target        = "backup:Dropbox/bup/machines/" <> host
+                , _rsyncFlags    = ["-a"]
+                , _shouldTarball = False
+                , _tarFlags      = []
+                }
      , RsyncJob { _hosts         = ["nereus"]
                 , _sources       = ["/srv/git"]
                 , _target        = "backup:Dropbox/bup/machines/" <> host
