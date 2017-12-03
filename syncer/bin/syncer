@@ -86,21 +86,18 @@ process job source =
     rsync (_rsyncFlags job) (_target job) source
     putStrLn ("Copied " ++ source ++ " to " ++ (_target job))
 
-runOne :: RsyncJob -> IO ()
-runOne j = mapM_ f (_sources j)
+runJob :: RsyncJob -> IO ()
+runJob job = mapM_ (process job) sources
   where
-    f s = process j s
-
-runMany :: (Env -> [RsyncJob]) -> IO ()
-runMany k = do
-  home     <- getHome
-  thisHost <- getHostname
-  let jobs   = k Env{_home = home, _host = thisHost}
-      myJobs = filter (elem thisHost . _hosts) jobs
-  mapM_ runOne myJobs
+    sources = _sources job
 
 main :: IO ()
-main = runMany createJobs
+main = do
+  home     <- getHome
+  thisHost <- getHostname
+  let jobs   = createJobs Env{_home = home, _host = thisHost}
+      myJobs = filter (elem thisHost . _hosts) jobs
+  mapM_ runJob myJobs
 
 -- Local Variables:
 -- mode: haskell
